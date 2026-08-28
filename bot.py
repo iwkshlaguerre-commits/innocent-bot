@@ -21,8 +21,6 @@ DUP_LIMIT = 3
 
 MENTION_LIMIT = 5
 EMOJI_LIMIT = 14
-CAPS_MIN_LETTERS = 18
-CAPS_RATIO = 0.82
 REPEAT_CHAR_LIMIT = 12
 LONG_MESSAGE_LIMIT = 1500
 NEWLINE_LIMIT = 18
@@ -194,12 +192,6 @@ def count_unicode_emojis(text):
     count += len(re.findall(r"<a?:\w+:\d+>", text))
     return count
 
-def excessive_caps(text):
-    letters = [c for c in text if c.isalpha()]
-    if len(letters) < CAPS_MIN_LETTERS:
-        return False
-    uppercase = sum(1 for c in letters if c.isupper())
-    return uppercase / len(letters) >= CAPS_RATIO
 
 def suspicious_repeated_chars(text):
     return re.search(r"(.)\1{" + str(REPEAT_CHAR_LIMIT - 1) + r",}", text) is not None
@@ -495,14 +487,6 @@ async def on_message(message):
     # ========================================================
 
     if cfg.get("weird_message_detection", True):
-        if excessive_caps(text):
-            await alert(
-                message.author, message.channel, 12,
-                "Message is overwhelmingly written in capital letters and may be disruptive.",
-                message, tag="caps"
-            )
-            return
-
         if suspicious_repeated_chars(text):
             await alert(
                 message.author, message.channel, 12,
