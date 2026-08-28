@@ -45,18 +45,44 @@ SUSPICIOUS_ATTACHMENT_EXTENSIONS = {
     ".ps1", ".vbs", ".js", ".zip", ".rar", ".7z"
 }
 
-# This is deliberately limited to high-confidence patterns.
-# It does NOT try to decide every argument/insult automatically.
+# High-confidence safety patterns.
+# These are intended to FLAG messages for moderator review, not auto-punish users.
+
 THREAT_PATTERNS = [
-    re.compile(r"\bi(?:'m| am)?\s+going\s+to\s+(?:hurt|attack|kill)\s+you\b", re.I),
-    re.compile(r"\bi(?:'ll| will)\s+(?:hurt|attack|kill)\s+you\b", re.I),
-    re.compile(r"\byou\s+should\s+(?:die|get hurt)\b", re.I),
+    # Direct physical-harm threats.
+    re.compile(r"\bi(?:'m| am)?\s+(?:gonna|going\s+to)\s+(?:hurt|attack|beat|jump|hit|kill)\s+you\b", re.I),
+    re.compile(r"\bi(?:'ll| will)\s+(?:hurt|attack|beat|jump|hit|kill)\s+you\b", re.I),
+    re.compile(r"\b(?:watch|wait)\s+(?:what|until).{0,25}\bi\s+(?:hurt|attack|beat|jump|hit)\s+you\b", re.I),
+    re.compile(r"\byou(?:'re| are)\s+gonna\s+(?:get\s+hurt|get\s+beat|regret\s+this)\b", re.I),
+    re.compile(r"\bi\s+know\s+where\s+you\s+(?:live|stay)\b", re.I),
+    re.compile(r"\b(?:come|pull)\s+up\b.{0,30}\b(?:fight|jump|beat|hurt)\b", re.I),
+]
+
+# Encouraging, pressuring, or telling another person to harm themselves.
+# Includes common coded shorthand/euphemisms moderators may want reviewed.
+SELF_HARM_ENCOURAGEMENT_PATTERNS = [
+    re.compile(r"\bdie\b", re.I),
+    re.compile(r"\b(?:kys|k\s*y\s*s)\b", re.I),
+    re.compile(r"\bkeys\b", re.I),
+    re.compile(r"\bks\b", re.I),
+    re.compile(r"\bgo\s+(?:hurt|harm)\s+yourself\b", re.I),
+    re.compile(r"\byou\s+should\s+(?:hurt|harm)\s+yourself\b", re.I),
+    re.compile(r"\bi\s+hope\s+you\s+(?:hurt|harm)\s+yourself\b", re.I),
+    re.compile(r"\bno\s+one\s+would\s+care\s+if\s+you\s+were\s+gone\b", re.I),
+    re.compile(r"\bthe\s+world\s+would\s+be\s+better\s+without\s+you\b", re.I),
 ]
 
 HARASSMENT_PATTERNS = [
-    re.compile(r"\bshut\s+up\b.{0,35}\b(?:idiot|stupid|loser)\b", re.I),
+    # Direct degrading/targeted statements.
+    re.compile(r"\bshut\s+up\b.{0,35}\b(?:idiot|stupid|loser|moron|freak)\b", re.I),
     re.compile(r"\bnobody\s+likes\s+you\b", re.I),
     re.compile(r"\beveryone\s+hates\s+you\b", re.I),
+    re.compile(r"\byou(?:'re| are)\s+(?:worthless|pathetic|disgusting|useless)\b", re.I),
+    re.compile(r"\bno\s+one\s+wants\s+you\s+here\b", re.I),
+    re.compile(r"\bget\s+out\b.{0,25}\b(?:loser|idiot|freak)\b", re.I),
+    re.compile(r"\b(?:you|ur|your)\s+(?:face|voice|existence)\s+(?:annoys|disgusts)\s+me\b", re.I),
+    re.compile(r"\b(?:stop|quit)\s+talking\b.{0,30}\b(?:nobody|no\s+one)\s+(?:cares|asked)\b", re.I),
+    re.compile(r"\b(?:everyone|we)\s+should\s+(?:ignore|exclude|block)\s+you\b", re.I),
 ]
 
 SCAM_PATTERNS = [
@@ -362,21 +388,91 @@ async def on_message(message):
         return
 
     # ========================================================
+    # REPLIES DIRECTED AT AIRI INNOCENT
+    # ========================================================
+    # If a member replies directly to one of Airi's messages/embeds
+    # with a threat, harmful encouragement, or harassment, warn them
+    # and notify moderators. This runs before the normal detectors so
+    # the alert clearly says the message was directed at the bot.
+
+    replied_to_airi = False
+
+    if message.reference is not None:
+        referenced = message.reference.resolved
+
+        if referenced is None and message.reference.message_id:
+            try:
+                referenced = await message.channel.fetch_message(
+                    message.reference.message_id
+                )
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                referenced = None
+
+        if (
+            isinstance(referenced, discord.Message)
+            and bot.user is not None
+            and referenced.author.id == bot.user.id
+        ):
+            replied_to_airi = True
+
+    if replied_to_airi:
+        if any(p.search(text) for p in THREAT_PATTERNS):
+            await alert(
+                message.author,
+                message.channel,
+                1,
+                "Replied directly to Airi Innocent with language that appears to threaten physical harm.",
+                message,
+                tag="reply_threat"
+            )
+            return
+
+        if any(p.search(text) for p in SELF_HARM_ENCOURAGEMENT_PATTERNS):
+            await alert(
+                message.author,
+                message.channel,
+                6,
+                "Replied directly to Airi Innocent with harmful encouragement or coded harmful language.",
+                message,
+                tag="reply_harm_encouragement"
+            )
+            return
+
+        if any(p.search(text) for p in HARASSMENT_PATTERNS):
+            await alert(
+                message.author,
+                message.channel,
+                1,
+                "Replied directly to Airi Innocent with targeted harassment or degrading language.",
+                message,
+                tag="reply_harassment"
+            )
+            return
+
+    # ========================================================
     # RULE 1 — HIGH-CONFIDENCE HARASSMENT / THREATS
     # ========================================================
 
     if any(p.search(text) for p in THREAT_PATTERNS):
         await alert(
             message.author, message.channel, 1,
-            "Message contains language that appears to threaten another person.",
+            "Message contains language that appears to threaten physical harm toward another person.",
             message, tag="threat"
+        )
+        return
+
+    if any(p.search(text) for p in SELF_HARM_ENCOURAGEMENT_PATTERNS):
+        await alert(
+            message.author, message.channel, 6,
+            "Message appears to encourage or pressure another person to harm themselves, including possible coded shorthand.",
+            message, tag="harm_encouragement"
         )
         return
 
     if any(p.search(text) for p in HARASSMENT_PATTERNS):
         await alert(
             message.author, message.channel, 1,
-            "Message appears to directly insult or target another member.",
+            "Message appears to directly degrade, isolate, or target another member.",
             message, tag="harassment"
         )
         return
